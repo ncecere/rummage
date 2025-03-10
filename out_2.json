@@ -1,0 +1,15 @@
+{
+  "success": true,
+  "data": {
+    "markdown": "# Example Domain\n\nThis domain is for use in illustrative examples in documents. You may use this\ndomain in literature without prior coordination or asking for permission.\n\n[More information...](https://www.iana.org/domains/example)",
+    "html": "\u003c!DOCTYPE html\u003e\u003chtml\u003e\n\n\u003cbody\u003e\n\n\u003cdiv\u003e\n    \u003ch1\u003eExample Domain\u003c/h1\u003e\n    \u003cp\u003eThis domain is for use in illustrative examples in documents. You may use this\n    domain in literature without prior coordination or asking for permission.\u003c/p\u003e\n    \u003cp\u003e\u003ca href=\"https://www.iana.org/domains/example\"\u003eMore information...\u003c/a\u003e\u003c/p\u003e\n\u003c/div\u003e\n\n\n\n\u003c/body\u003e\u003c/html\u003e",
+    "links": [
+      "https://www.iana.org/domains/example"
+    ],
+    "metadata": {
+      "title": "Example Domain",
+      "sourceURL": "https://example.com",
+      "statusCode": 200
+    }
+  }
+}

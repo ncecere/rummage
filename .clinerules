@@ -1,0 +1,66 @@
+### 1. File Structure & Length
+
+- **Keep Files Concise:**  
+  Each source file should contain between 100 and 200 lines. Files shorter than 100 lines may indicate underutilization of the module, while files longer than 200 lines could be a sign to refactor and split functionality into separate, focused files.
+
+- **Logical File Boundaries:**  
+  Ensure that each file represents a single responsibility or feature. If a file begins to cover multiple concerns, consider splitting it into multiple files or packages.
+
+---
+
+### 2. Modular Design
+
+- **Single Responsibility Principle:**  
+  Each package or module should have a clearly defined purpose. Group related functions, types, and constants together, and avoid creating monolithic packages.
+
+- **Package Organization:**  
+  Organize your project with a well-defined package hierarchy. For example, use subpackages like `api`, `service`, `model`, and `utils` to separate concerns.
+
+- **Interface Usage:**  
+  Define interfaces for behaviors that may have multiple implementations. This promotes loose coupling and makes testing easier.
+
+- **Dependency Management:**  
+  Use dependency injection where possible to manage dependencies. This not only increases modularity but also makes your code more testable.
+
+---
+
+### 3. Coding Best Practices
+
+- **Adhere to Go Conventions:**  
+  Follow Go’s naming conventions (e.g., camelCase for non-exported identifiers and PascalCase for exported ones) and code organization guidelines. Use `gofmt` to format your code uniformly.
+
+- **Error Handling:**  
+  Handle errors immediately and clearly. Use idiomatic error wrapping and logging to provide context without overwhelming the code.
+
+- **Testing & Documentation:**  
+  - Write unit tests for each module. Use table-driven tests where appropriate to keep tests concise and maintainable.
+  - Document your public functions and types using Go’s documentation conventions so that tools like `godoc` can generate useful reference material.
+
+- **Concurrency & Synchronization:**  
+  Leverage Go’s concurrency model responsibly. Use channels and goroutines for parallel tasks, and be mindful of race conditions—employ the `race` detector during testing.
+
+- **Static Analysis & Linters:**  
+  Integrate tools like `go vet`, `golangci-lint`, and `staticcheck` into your development process. They help catch common mistakes and enforce style guidelines.
+
+---
+
+### 4. Additional Practical Rules
+
+- **Code Reviews:**  
+  Implement mandatory code reviews to maintain code quality. Peer reviews are an effective way to enforce these guidelines and share best practices.
+
+- **Version Control Practices:**  
+  Keep commits small and focused. Each commit should ideally cover a single logical change. Use meaningful commit messages and maintain a clear branching strategy.
+
+- **Configuration & Environment Separation:**  
+  Store configuration settings outside of the codebase, such as in environment variables or separate config files. This separation aids in maintaining modularity and flexibility across environments.
+
+- **Continuous Integration:**  
+  Set up a CI pipeline to run tests, linters, and build checks automatically. This ensures that the modular codebase adheres to best practices before merging changes.
+
+- **Regular Refactoring:**  
+  Schedule periodic reviews to refactor and improve code. As the codebase evolves, revisiting the design and structure helps prevent technical debt.
+
+- **Performance Awareness:**  
+  Optimize only when necessary. Use profiling tools to identify bottlenecks and ensure that modularization does not compromise performance.
+
