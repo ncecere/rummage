@@ -47,10 +47,9 @@ func (h *ScraperHandler) HandleScrape(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return the response
-	w.Header().Set("Content-Type", "application/json")
-	encoder := json.NewEncoder(w)
-	encoder.SetIndent("", "  ")
-	encoder.SetEscapeHTML(false) // Don't escape HTML entities in the output
-	encoder.Encode(response)
+	// Return the response using the utility function
+	if err := WriteJSON(w, http.StatusOK, response); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
