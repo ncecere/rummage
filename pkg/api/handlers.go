@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/ncecere/rummage/pkg/models"
@@ -24,14 +23,13 @@ func NewScraperHandler(service *service.ScraperService) *ScraperHandler {
 func (h *ScraperHandler) HandleScrape(w http.ResponseWriter, r *http.Request) {
 	// Parse the request body
 	var req models.ScrapeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if !DecodeJSONBody(w, r, &req) {
 		return
 	}
 
 	// Validate the URL
 	if req.URL == "" {
-		http.Error(w, "URL is required", http.StatusBadRequest)
+		WriteErrorResponse(w, "URL is required", http.StatusBadRequest)
 		return
 	}
 
@@ -43,13 +41,12 @@ func (h *ScraperHandler) HandleScrape(w http.ResponseWriter, r *http.Request) {
 	// Call the service
 	response, err := h.service.Scrape(req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		WriteServiceError(w, err)
 		return
 	}
 
-	// Return the response using the utility function
+	// Return the response
 	if err := WriteJSON(w, http.StatusOK, response); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		WriteServiceError(w, err)
 	}
 }

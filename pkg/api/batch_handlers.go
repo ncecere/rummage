@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -25,14 +24,13 @@ func NewBatchScrapeHandler(batchService *service.BatchScraperService) *BatchScra
 func (h *BatchScrapeHandler) HandleBatchScrape(w http.ResponseWriter, r *http.Request) {
 	// Parse the request body
 	var req models.BatchScrapeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if !DecodeJSONBody(w, r, &req) {
 		return
 	}
 
 	// Validate the request
 	if len(req.URLs) == 0 {
-		http.Error(w, "No URLs provided", http.StatusBadRequest)
+		WriteErrorResponse(w, "No URLs provided", http.StatusBadRequest)
 		return
 	}
 
@@ -44,14 +42,13 @@ func (h *BatchScrapeHandler) HandleBatchScrape(w http.ResponseWriter, r *http.Re
 	// Process the batch scrape request
 	resp, err := h.batchService.BatchScrape(r.Context(), req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		WriteServiceError(w, err)
 		return
 	}
 
-	// Return the response using the utility function
+	// Return the response
 	if err := WriteJSON(w, http.StatusOK, resp); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		WriteServiceError(w, err)
 	}
 }
 
@@ -59,23 +56,21 @@ func (h *BatchScrapeHandler) HandleBatchScrape(w http.ResponseWriter, r *http.Re
 func (h *BatchScrapeHandler) HandleGetBatchScrapeStatus(w http.ResponseWriter, r *http.Request) {
 	// Get the job ID from the URL
 	vars := mux.Vars(r)
-	jobID := vars["id"]
-	if jobID == "" {
-		http.Error(w, "Job ID is required", http.StatusBadRequest)
+	jobID, ok := GetMuxVar(w, vars, "id")
+	if !ok {
 		return
 	}
 
 	// Get the job status
 	resp, err := h.batchService.GetBatchScrapeStatus(r.Context(), jobID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		WriteServiceError(w, err)
 		return
 	}
 
-	// Return the response using the utility function
+	// Return the response
 	if err := WriteJSON(w, http.StatusOK, resp); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		WriteServiceError(w, err)
 	}
 }
 
@@ -83,22 +78,20 @@ func (h *BatchScrapeHandler) HandleGetBatchScrapeStatus(w http.ResponseWriter, r
 func (h *BatchScrapeHandler) HandleGetBatchScrapeErrors(w http.ResponseWriter, r *http.Request) {
 	// Get the job ID from the URL
 	vars := mux.Vars(r)
-	jobID := vars["id"]
-	if jobID == "" {
-		http.Error(w, "Job ID is required", http.StatusBadRequest)
+	jobID, ok := GetMuxVar(w, vars, "id")
+	if !ok {
 		return
 	}
 
 	// Get the job errors
 	resp, err := h.batchService.GetBatchScrapeErrors(r.Context(), jobID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		WriteServiceError(w, err)
 		return
 	}
 
-	// Return the response using the utility function
+	// Return the response
 	if err := WriteJSON(w, http.StatusOK, resp); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		WriteServiceError(w, err)
 	}
 }

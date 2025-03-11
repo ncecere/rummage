@@ -124,87 +124,82 @@ func (s *BatchScraperService) GetBatchScrapeErrors(ctx context.Context, jobID st
 	}, nil
 }
 
-// processJob processes a batch scrape job
-func (s *BatchScraperService) processJob(ctx context.Context, jobID string, urls []string) {
-	// Get the job from the store
-	job, err := s.jobStore.GetJob(ctx, jobID)
+// processURL processes a single URL and returns either a successful ScrapeData or a ScrapeError
+// It also handles checking for robots.txt blocked URLs
+func (s *BatchScraperService) processURL(ctx context.Context, url string, req models.BatchScrapeRequest) (models.ScrapeData, *models.ScrapeError, bool) {
+	// Create a scrape request for this URL
+	scrapeReq := models.ScrapeRequest{
+		URL:             url,
+		Formats:         req.Formats,
+		OnlyMainContent: req.OnlyMainContent,
+		IncludeTags:     req.IncludeTags,
+		ExcludeTags:     req.ExcludeTags,
+		Headers:         req.Headers,
+		WaitFor:         req.WaitFor,
+		Timeout:         req.Timeout,
+	}
+
+	// Scrape the URL
+	result, err := s.scraper.Scrape(scrapeReq)
 	if err != nil {
-		// Log the error
-		fmt.Printf("Failed to get job %s: %v\n", jobID, err)
-		return
+		// Check if it's a robots.txt blocked error
+		if err.Error() == "blocked by robots.txt" {
+			return models.ScrapeData{}, nil, true
+		}
+
+		// Create a scrape error
+		scrapeError := &models.ScrapeError{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			URL:       url,
+			Error:     err.Error(),
+		}
+		return models.ScrapeData{}, scrapeError, false
 	}
 
-	// Update job status to processing
-	job.Status = models.JobStatusProcessing
-	if err := s.jobStore.UpdateJob(ctx, *job); err != nil {
-		// Log the error
-		fmt.Printf("Failed to update job %s: %v\n", jobID, err)
-		return
+	// Return the successful result
+	return result.Data, nil, false
+}
+
+// processURLWithSemaphore wraps processURL with semaphore-based concurrency control
+func (s *BatchScraperService) processURLWithSemaphore(
+	ctx context.Context,
+	url string,
+	req models.BatchScrapeRequest,
+	resultChan chan<- models.ScrapeData,
+	errorChan chan<- models.ScrapeError,
+	robotsBlockedChan chan<- string,
+	semaphore chan struct{},
+	wg *sync.WaitGroup,
+) {
+	defer wg.Done()
+
+	// Acquire semaphore
+	semaphore <- struct{}{}
+	defer func() { <-semaphore }()
+
+	// Process the URL
+	data, scrapeErr, isRobotsBlocked := s.processURL(ctx, url, req)
+
+	// Send the result to the appropriate channel
+	if isRobotsBlocked {
+		robotsBlockedChan <- url
+	} else if scrapeErr != nil {
+		errorChan <- *scrapeErr
+	} else {
+		resultChan <- data
 	}
+}
 
-	// Process each URL
-	var wg sync.WaitGroup
-	resultChan := make(chan models.ScrapeData, len(urls))
-	errorChan := make(chan models.ScrapeError, len(urls))
-	robotsBlockedChan := make(chan string, len(urls))
-
-	// Limit concurrency to avoid overwhelming the system
-	semaphore := make(chan struct{}, 5)
-
-	for _, u := range urls {
-		wg.Add(1)
-		go func(url string) {
-			defer wg.Done()
-
-			// Acquire semaphore
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-
-			// Create a scrape request for this URL
-			scrapeReq := models.ScrapeRequest{
-				URL:             url,
-				Formats:         job.Request.Formats,
-				OnlyMainContent: job.Request.OnlyMainContent,
-				IncludeTags:     job.Request.IncludeTags,
-				ExcludeTags:     job.Request.ExcludeTags,
-				Headers:         job.Request.Headers,
-				WaitFor:         job.Request.WaitFor,
-				Timeout:         job.Request.Timeout,
-			}
-
-			// Scrape the URL
-			result, err := s.scraper.Scrape(scrapeReq)
-			if err != nil {
-				// Check if it's a robots.txt blocked error
-				if err.Error() == "blocked by robots.txt" {
-					robotsBlockedChan <- url
-					return
-				}
-
-				// Create a scrape error
-				scrapeError := models.ScrapeError{
-					ID:        uuid.New().String(),
-					Timestamp: time.Now(),
-					URL:       url,
-					Error:     err.Error(),
-				}
-				errorChan <- scrapeError
-				return
-			}
-
-			// Send the result data
-			resultChan <- result.Data
-		}(u)
-	}
-
-	// Wait for all goroutines to finish
-	wg.Wait()
-	close(resultChan)
-	close(errorChan)
-	close(robotsBlockedChan)
-
+// collectResults collects results from channels and updates the job
+func (s *BatchScraperService) collectResults(
+	resultChan <-chan models.ScrapeData,
+	errorChan <-chan models.ScrapeError,
+	robotsBlockedChan <-chan string,
+	job *models.BatchJob,
+) {
 	// Collect results
-	results := make([]models.ScrapeData, 0, len(urls))
+	results := make([]models.ScrapeData, 0)
 	for result := range resultChan {
 		results = append(results, result)
 	}
@@ -235,6 +230,58 @@ func (s *BatchScraperService) processJob(ctx context.Context, jobID string, urls
 		// At least some URLs succeeded
 		job.Status = models.JobStatusCompleted
 	}
+}
+
+// processJob processes a batch scrape job
+func (s *BatchScraperService) processJob(ctx context.Context, jobID string, urls []string) {
+	// Get the job from the store
+	job, err := s.jobStore.GetJob(ctx, jobID)
+	if err != nil {
+		// Log the error
+		fmt.Printf("Failed to get job %s: %v\n", jobID, err)
+		return
+	}
+
+	// Update job status to processing
+	job.Status = models.JobStatusProcessing
+	if err := s.jobStore.UpdateJob(ctx, *job); err != nil {
+		// Log the error
+		fmt.Printf("Failed to update job %s: %v\n", jobID, err)
+		return
+	}
+
+	// Set up channels for collecting results
+	var wg sync.WaitGroup
+	resultChan := make(chan models.ScrapeData, len(urls))
+	errorChan := make(chan models.ScrapeError, len(urls))
+	robotsBlockedChan := make(chan string, len(urls))
+
+	// Limit concurrency to avoid overwhelming the system
+	semaphore := make(chan struct{}, 5)
+
+	// Process each URL concurrently with controlled parallelism
+	for _, url := range urls {
+		wg.Add(1)
+		go s.processURLWithSemaphore(
+			ctx,
+			url,
+			job.Request,
+			resultChan,
+			errorChan,
+			robotsBlockedChan,
+			semaphore,
+			&wg,
+		)
+	}
+
+	// Wait for all goroutines to finish
+	wg.Wait()
+	close(resultChan)
+	close(errorChan)
+	close(robotsBlockedChan)
+
+	// Collect results and update the job
+	s.collectResults(resultChan, errorChan, robotsBlockedChan, job)
 
 	// Update the job in the store
 	if err := s.jobStore.UpdateJob(ctx, *job); err != nil {
