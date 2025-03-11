@@ -4,15 +4,21 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/ncecere/rummage/pkg/scraper"
+	"github.com/ncecere/rummage/pkg/service"
 )
 
 // NewRouter creates and configures a new router
 func NewRouter() *mux.Router {
 	r := mux.NewRouter()
 
+	// Create services
+	scraperService := service.NewScraperService()
+
+	// Create handlers
+	scraperHandler := NewScraperHandler(scraperService)
+
 	// API routes
-	r.HandleFunc("/v1/scrape", scraper.HandleScrape).Methods("POST")
+	r.HandleFunc("/v1/scrape", scraperHandler.HandleScrape).Methods("POST")
 
 	// Add middleware
 	r.Use(loggingMiddleware)

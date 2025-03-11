@@ -14,9 +14,6 @@ Rummage is a web scraping API service built in Go that provides functionality si
   - `html`: Return processed HTML content
   - `rawHtml`: Return raw HTML content
   - `links`: Extract all links from the page
-  - `json`: Extract structured data (coming soon)
-  - `screenshot`: Capture screenshot of the page (coming soon)
-  - `screenshot@fullPage`: Capture full page screenshot (coming soon)
 
 ## Getting Started
 
