@@ -1,0 +1,38 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rummage-app
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - REDIS_URL=redis:6379
+      - BASE_URL=http://localhost:8080
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - rummage-network
+
+  redis:
+    image: redis:alpine
+    container_name: rummage-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - rummage-network
+    command: redis-server --appendonly yes
+
+networks:
+  rummage-network:
+    driver: bridge
+
+volumes:
+  redis-data:

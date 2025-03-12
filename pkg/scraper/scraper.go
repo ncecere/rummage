@@ -1,332 +1,237 @@
 package scraper
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
-	"regexp"
+	"net/url"
 	"strings"
 	"time"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/gocolly/colly/v2"
+	"github.com/ncecere/rummage/pkg/model"
+	"github.com/ncecere/rummage/pkg/utils"
 )
 
-// ScrapeRequest represents the request payload for the scrape endpoint
-type ScrapeRequest struct {
-	URL                 string                   `json:"url"`
-	Formats             []string                 `json:"formats,omitempty"`
-	OnlyMainContent     bool                     `json:"onlyMainContent,omitempty"`
-	IncludeTags         []string                 `json:"includeTags,omitempty"`
-	ExcludeTags         []string                 `json:"excludeTags,omitempty"`
-	Headers             map[string]string        `json:"headers,omitempty"`
-	WaitFor             int                      `json:"waitFor,omitempty"`
-	Mobile              bool                     `json:"mobile,omitempty"`
-	SkipTlsVerification bool                     `json:"skipTlsVerification,omitempty"`
-	Timeout             int                      `json:"timeout,omitempty"`
-	JSONOptions         JSONOptions              `json:"jsonOptions,omitempty"`
-	Actions             []map[string]interface{} `json:"actions,omitempty"`
-	Location            Location                 `json:"location,omitempty"`
-	RemoveBase64Images  bool                     `json:"removeBase64Images,omitempty"`
-	BlockAds            bool                     `json:"blockAds,omitempty"`
-	Proxy               string                   `json:"proxy,omitempty"`
+// scraper handles the scraping of a single URL.
+type scraper struct {
+	client  *http.Client
+	request model.ScrapeRequest
 }
 
-// JSONOptions represents the options for JSON extraction
-type JSONOptions struct {
-	Schema       map[string]interface{} `json:"schema,omitempty"`
-	SystemPrompt string                 `json:"systemPrompt,omitempty"`
-	Prompt       string                 `json:"prompt,omitempty"`
-}
-
-// Location represents the location settings for the request
-type Location struct {
-	Country   string   `json:"country,omitempty"`
-	Languages []string `json:"languages,omitempty"`
-}
-
-// ScrapeResponse represents the response from the scrape endpoint
-type ScrapeResponse struct {
-	Success bool       `json:"success"`
-	Data    ScrapeData `json:"data,omitempty"`
-}
-
-// ScrapeData represents the data returned from the scrape endpoint
-type ScrapeData struct {
-	Markdown      string                 `json:"markdown,omitempty"`
-	HTML          string                 `json:"html,omitempty"`
-	RawHTML       string                 `json:"rawHtml,omitempty"`
-	Screenshot    string                 `json:"screenshot,omitempty"`
-	Links         []string               `json:"links,omitempty"`
-	Actions       *ActionsResult         `json:"actions,omitempty"`
-	Metadata      Metadata               `json:"metadata,omitempty"`
-	LLMExtraction map[string]interface{} `json:"llm_extraction,omitempty"`
-	Warning       string                 `json:"warning,omitempty"`
-}
-
-// ActionsResult represents the result of actions performed during scraping
-type ActionsResult struct {
-	Screenshots []string `json:"screenshots,omitempty"`
-}
-
-// Metadata represents the metadata of the scraped page
-type Metadata struct {
-	Title       string `json:"title,omitempty"`
-	Description string `json:"description,omitempty"`
-	Language    string `json:"language,omitempty"`
-	SourceURL   string `json:"sourceURL,omitempty"`
-	StatusCode  int    `json:"statusCode,omitempty"`
-	Error       string `json:"error,omitempty"`
-}
-
-// HandleScrape handles the scrape endpoint
-func HandleScrape(w http.ResponseWriter, r *http.Request) {
-	// Parse the request body
-	var req ScrapeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request payload: %v", err), http.StatusBadRequest)
-		return
+// newScraper creates a new scraper for the given request.
+func newScraper(client *http.Client, req model.ScrapeRequest) *scraper {
+	return &scraper{
+		client:  client,
+		request: req,
 	}
+}
 
-	// Validate the URL
-	if req.URL == "" {
-		http.Error(w, "URL is required", http.StatusBadRequest)
-		return
-	}
-
-	// Set default formats if not provided
-	if len(req.Formats) == 0 {
-		req.Formats = []string{"markdown"}
-	}
-
-	// Set default timeout if not provided
-	if req.Timeout == 0 {
-		req.Timeout = 30000
-	}
-
+// scrape performs the scraping operation and returns the result.
+func (s *scraper) scrape() (*model.ScrapeResult, error) {
 	// Create a new collector
 	c := colly.NewCollector(
-		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"),
-		colly.MaxDepth(1),
+		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"),
 	)
 
 	// Set timeout
-	c.SetRequestTimeout(time.Duration(req.Timeout) * time.Millisecond)
+	c.SetRequestTimeout(time.Duration(s.request.Timeout) * time.Millisecond)
 
-	// Initialize the response
-	response := ScrapeResponse{
-		Success: true,
-		Data: ScrapeData{
-			Metadata: Metadata{
-				SourceURL: req.URL,
-			},
+	// Set custom headers if provided
+	if len(s.request.Headers) > 0 {
+		c.OnRequest(func(r *colly.Request) {
+			for key, value := range s.request.Headers {
+				r.Headers.Set(key, value)
+			}
+		})
+	}
+
+	// Initialize result
+	result := &model.ScrapeResult{
+		Metadata: &model.ScrapeMetadata{
+			SourceURL: s.request.URL,
 		},
 	}
 
-	// Handle HTML response
-	var htmlContent string
-	c.OnResponse(func(r *colly.Response) {
-		htmlContent = string(r.Body)
-		response.Data.Metadata.StatusCode = r.StatusCode
+	// Wait for JavaScript to load if specified
+	if s.request.WaitFor > 0 {
+		c.OnRequest(func(r *colly.Request) {
+			time.Sleep(time.Duration(s.request.WaitFor) * time.Millisecond)
+		})
+	}
 
-		// Parse HTML with goquery
-		doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
+	// Process HTML
+	c.OnResponse(func(r *colly.Response) {
+		result.Metadata.StatusCode = r.StatusCode
+
+		// Parse HTML
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(r.Body)))
 		if err != nil {
-			response.Data.Metadata.Error = fmt.Sprintf("Failed to parse HTML: %v", err)
 			return
 		}
 
 		// Extract metadata
-		response.Data.Metadata.Title = doc.Find("title").Text()
-		response.Data.Metadata.Description = getMetaContent(doc, "description")
-		response.Data.Metadata.Language = doc.Find("html").AttrOr("lang", "")
+		result.Metadata.Title = doc.Find("title").Text()
+		result.Metadata.Description = doc.Find("meta[name=description]").AttrOr("content", "")
+		result.Metadata.Language = doc.Find("html").AttrOr("lang", "")
 
-		// Extract links if requested
-		if contains(req.Formats, "links") {
-			links := []string{}
-			doc.Find("a[href]").Each(func(_ int, s *goquery.Selection) {
-				if href, exists := s.Attr("href"); exists {
-					links = append(links, href)
-				}
-			})
-			response.Data.Links = links
-		}
-
-		// Include HTML if requested
-		if contains(req.Formats, "html") {
-			// If onlyMainContent is true, try to extract main content
-			if req.OnlyMainContent {
-				mainContent := extractMainContent(doc)
-				if mainContent != "" {
-					// Create a simplified HTML document with just the main content
-					response.Data.HTML = fmt.Sprintf("<!DOCTYPE html><html>\n\n<body>\n%s\n\n</body></html>", mainContent)
-				} else {
-					// If no main content found, extract just the body
-					bodyHTML, err := doc.Find("body").Html()
-					if err == nil && bodyHTML != "" {
-						response.Data.HTML = fmt.Sprintf("<!DOCTYPE html><html>\n\n<body>\n%s\n</body></html>", bodyHTML)
-					} else {
-						response.Data.HTML = htmlContent
-					}
-				}
-			} else {
-				// Even when not requesting only main content, provide a cleaner HTML
-				bodyHTML, err := doc.Find("body").Html()
-				if err == nil && bodyHTML != "" {
-					response.Data.HTML = fmt.Sprintf("<!DOCTYPE html><html>\n\n<body>\n%s\n</body></html>", bodyHTML)
-				} else {
-					response.Data.HTML = htmlContent
-				}
+		// Process content based on requested formats
+		for _, format := range s.request.Formats {
+			switch format {
+			case "markdown":
+				result.Markdown = s.extractMarkdown(doc)
+			case "html":
+				result.HTML = s.extractHTML(doc)
+			case "rawHtml":
+				result.RawHTML = string(r.Body)
+			case "links":
+				result.Links = s.extractLinks(doc)
 			}
 		}
-
-		// Include raw HTML if requested
-		if contains(req.Formats, "rawHtml") {
-			response.Data.RawHTML = htmlContent
-		}
-
-		// Handle screenshot format (not implemented yet)
-		if contains(req.Formats, "screenshot") {
-			response.Data.Warning = "Screenshot format is not implemented in this version"
-		}
-
-		// Handle screenshot@fullPage format (not implemented yet)
-		if contains(req.Formats, "screenshot@fullPage") {
-			response.Data.Warning = "Screenshot@fullPage format is not implemented in this version"
-		}
-
-		// Handle JSON format (not implemented yet)
-		if contains(req.Formats, "json") {
-			if req.JSONOptions.Schema != nil || req.JSONOptions.Prompt != "" || req.JSONOptions.SystemPrompt != "" {
-				response.Data.Warning = "JSON extraction with LLM is not implemented in this version"
-			}
-		}
-
-		// Convert to markdown if requested
-		if contains(req.Formats, "markdown") {
-			// Configure the converter with options for cleaner output
-			converter := md.NewConverter("", true, nil)
-
-			// Remove unwanted elements before conversion
-			doc.Find("style, script, noscript, iframe, nav, footer, header").Remove()
-
-			var mdContent string
-			var err error
-
-			if req.OnlyMainContent {
-				mainContent := extractMainContent(doc)
-				if mainContent != "" {
-					// For main content, convert directly
-					mdContent, err = converter.ConvertString(mainContent)
-				} else {
-					// If no main content found, try to extract just the body content
-					bodyHTML, bodyErr := doc.Find("body").Html()
-					if bodyErr == nil && bodyHTML != "" {
-						mdContent, err = converter.ConvertString(bodyHTML)
-					} else {
-						mdContent, err = converter.ConvertString(htmlContent)
-					}
-				}
-			} else {
-				// Even when not requesting only main content, try to focus on body
-				bodyHTML, bodyErr := doc.Find("body").Html()
-				if bodyErr == nil && bodyHTML != "" {
-					mdContent, err = converter.ConvertString(bodyHTML)
-				} else {
-					mdContent, err = converter.ConvertString(htmlContent)
-				}
-			}
-
-			if err != nil {
-				response.Data.Warning = fmt.Sprintf("Failed to convert HTML to markdown: %v", err)
-			} else {
-				// Clean up the markdown output
-				mdContent = cleanMarkdown(mdContent)
-				response.Data.Markdown = mdContent
-			}
-		}
-	})
-
-	// Handle errors
-	c.OnError(func(r *colly.Response, err error) {
-		response.Success = false
-		response.Data.Metadata.StatusCode = r.StatusCode
-		response.Data.Metadata.Error = err.Error()
 	})
 
 	// Start scraping
-	err := c.Visit(req.URL)
+	err := c.Visit(s.request.URL)
 	if err != nil {
-		response.Success = false
-		response.Data.Metadata.Error = err.Error()
+		return nil, fmt.Errorf("failed to scrape URL: %w", err)
 	}
 
-	// Return the response with proper JSON formatting
-	w.Header().Set("Content-Type", "application/json")
-	encoder := json.NewEncoder(w)
-	encoder.SetIndent("", "  ")
-	encoder.SetEscapeHTML(false) // Don't escape HTML entities in the output
-	encoder.Encode(response)
+	return result, nil
 }
 
-// Helper function to check if a slice contains a string
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
+// extractMarkdown extracts markdown content from the document.
+func (s *scraper) extractMarkdown(doc *goquery.Document) string {
+	// Create a copy of the document to modify
+	docCopy := cloneDocument(doc)
+
+	// Apply content filters
+	s.applyContentFilters(docCopy)
+
+	// Convert HTML to markdown
+	converter := md.NewConverter("", true, nil)
+	html, _ := docCopy.Html()
+	markdown, _ := converter.ConvertString(html)
+
+	return markdown
+}
+
+// extractHTML extracts processed HTML content from the document.
+func (s *scraper) extractHTML(doc *goquery.Document) string {
+	// Create a copy of the document to modify
+	docCopy := cloneDocument(doc)
+
+	// Apply content filters
+	s.applyContentFilters(docCopy)
+
+	// Get HTML
+	html, err := docCopy.Html()
+	if err != nil {
+		return ""
+	}
+
+	return html
+}
+
+// extractLinks extracts all links from the document.
+func (s *scraper) extractLinks(doc *goquery.Document) []string {
+	links := make([]string, 0)
+	baseURL, _ := url.Parse(s.request.URL)
+
+	doc.Find("a[href]").Each(func(_ int, sel *goquery.Selection) {
+		href, exists := sel.Attr("href")
+		if !exists || href == "" || strings.HasPrefix(href, "#") {
+			return
 		}
-	}
-	return false
-}
 
-// Helper function to get meta content
-func getMetaContent(doc *goquery.Document, name string) string {
-	content := ""
-	doc.Find("meta").Each(func(_ int, s *goquery.Selection) {
-		if n, _ := s.Attr("name"); n == name {
-			content, _ = s.Attr("content")
-		} else if p, _ := s.Attr("property"); p == "og:"+name {
-			content, _ = s.Attr("content")
+		// Resolve relative URLs
+		if utils.IsRelativeURL(href) {
+			u, err := url.Parse(href)
+			if err != nil {
+				return
+			}
+			href = baseURL.ResolveReference(u).String()
+		}
+
+		// Only add valid URLs
+		if utils.IsValidURL(href) {
+			links = append(links, href)
 		}
 	})
-	return content
+
+	return links
 }
 
-// Helper function to extract main content
-func extractMainContent(doc *goquery.Document) string {
-	// Try to find main content using common selectors
-	selectors := []string{"main", "article", "#content", ".content", "#main", ".main"}
-
-	for _, selector := range selectors {
-		if selection := doc.Find(selector).First(); selection.Length() > 0 {
-			html, err := selection.Html()
-			if err == nil && html != "" {
-				return html
-			}
-		}
+// applyContentFilters applies content filters based on the request options.
+func (s *scraper) applyContentFilters(doc *goquery.Document) {
+	// Extract only main content if requested
+	if s.request.OnlyMainContent {
+		s.extractMainContent(doc)
 	}
 
-	return ""
+	// Include only specific tags if requested
+	if len(s.request.IncludeTags) > 0 {
+		s.includeOnlyTags(doc, s.request.IncludeTags)
+	}
+
+	// Exclude specific tags if requested
+	if len(s.request.ExcludeTags) > 0 {
+		s.excludeTags(doc, s.request.ExcludeTags)
+	}
 }
 
-// Helper function to clean up markdown output
-func cleanMarkdown(input string) string {
-	// Remove extra newlines
-	re := regexp.MustCompile(`\n{3,}`)
-	cleaned := re.ReplaceAllString(input, "\n\n")
+// extractMainContent attempts to extract the main content from the document.
+func (s *scraper) extractMainContent(doc *goquery.Document) {
+	// Remove common non-content elements
+	doc.Find("header, nav, footer, aside, .sidebar, .nav, .menu, .advertisement, script, style, noscript").Remove()
 
-	// Remove title if it's duplicated in the content
-	lines := strings.Split(cleaned, "\n")
-	if len(lines) > 2 {
-		if strings.HasPrefix(lines[2], "# ") && strings.TrimSpace(lines[0]) == strings.TrimSpace(strings.TrimPrefix(lines[2], "# ")) {
-			lines = lines[2:]
-			cleaned = strings.Join(lines, "\n")
-		}
+	// Look for common content containers
+	mainContent := doc.Find("main, article, .content, .post, .entry, #content, #main, #post")
+	if mainContent.Length() > 0 {
+		// Replace body with just the main content
+		body := doc.Find("body")
+		body.Empty()
+		body.AppendSelection(mainContent)
+	}
+}
+
+// includeOnlyTags keeps only the specified tags in the document.
+func (s *scraper) includeOnlyTags(doc *goquery.Document, includeTags []string) {
+	body := doc.Find("body")
+	container := cloneDocument(doc).Find("body")
+	container.Empty()
+
+	// Create a selector for all tags to include
+	selector := strings.Join(includeTags, ", ")
+	body.Find(selector).Each(func(_ int, sel *goquery.Selection) {
+		container.AppendSelection(sel)
+	})
+
+	// Replace body content with filtered content
+	body.Empty()
+	body.AppendSelection(container.Children())
+}
+
+// excludeTags removes the specified tags from the document.
+func (s *scraper) excludeTags(doc *goquery.Document, excludeTags []string) {
+	for _, tag := range excludeTags {
+		doc.Find(tag).Remove()
+	}
+}
+
+// cloneDocument is a helper function to clone a goquery document.
+func cloneDocument(doc *goquery.Document) *goquery.Document {
+	html, err := doc.Html()
+	if err != nil {
+		doc, _ := goquery.NewDocumentFromReader(strings.NewReader(""))
+		return doc
 	}
 
-	// Trim leading/trailing whitespace
-	cleaned = strings.TrimSpace(cleaned)
+	newDoc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		doc, _ := goquery.NewDocumentFromReader(strings.NewReader(""))
+		return doc
+	}
 
-	return cleaned
+	return newDoc
 }

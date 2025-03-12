@@ -1,3 +1,4 @@
+// Package storage provides data persistence functionality.
 package storage
 
 import (
@@ -8,149 +9,145 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
-	"github.com/ncecere/rummage/pkg/models"
+	"github.com/google/uuid"
+	"github.com/ncecere/rummage/pkg/config"
+	"github.com/ncecere/rummage/pkg/model"
 )
 
 const (
-	// Default expiration time for jobs (24 hours)
-	defaultJobExpiration = 24 * time.Hour
-
-	// Key prefixes for Redis
-	jobKeyPrefix = "job:"
-	jobListKey   = "jobs"
+	// Key prefix for batch jobs
+	batchJobKeyPrefix = "batch:job:"
 )
 
-// RedisJobStore implements job storage using Redis
-type RedisJobStore struct {
-	client *redis.Client
+// StorageOptions contains configuration options for the Redis storage.
+type StorageOptions struct {
+	RedisURL          string
+	JobExpirationTime time.Duration
 }
 
-// NewRedisJobStore creates a new Redis-based job store
-func NewRedisJobStore(addr string) (*RedisJobStore, error) {
-	client := redis.NewClient(&redis.Options{
-		Addr: addr,
-	})
+// RedisStorage handles Redis operations for the application.
+type RedisStorage struct {
+	client            *redis.Client
+	ctx               context.Context
+	jobExpirationTime time.Duration
+}
 
-	// Test the connection
+// NewRedisStorage creates a new Redis storage instance.
+func NewRedisStorage(redisURL string) (*RedisStorage, error) {
+	// Load config for default values
+	cfg := config.LoadConfig()
+
+	return NewRedisStorageWithOptions(StorageOptions{
+		RedisURL:          redisURL,
+		JobExpirationTime: time.Duration(cfg.JobExpirationHours) * time.Hour,
+	})
+}
+
+// NewRedisStorageWithOptions creates a new Redis storage instance with custom options.
+func NewRedisStorageWithOptions(opts StorageOptions) (*RedisStorage, error) {
+	redisOpts, err := redis.ParseURL(opts.RedisURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse Redis URL: %w", err)
+	}
+
+	client := redis.NewClient(redisOpts)
 	ctx := context.Background()
+
+	// Test connection
 	if err := client.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 	}
 
-	return &RedisJobStore{
-		client: client,
+	return &RedisStorage{
+		client:            client,
+		ctx:               ctx,
+		jobExpirationTime: opts.JobExpirationTime,
 	}, nil
 }
 
-// CreateJob creates a new batch job and stores it in Redis
-func (s *RedisJobStore) CreateJob(ctx context.Context, job models.BatchJob) error {
-	// Set job creation time
-	job.CreatedAt = time.Now()
-	job.UpdatedAt = job.CreatedAt
-	job.ExpiresAt = job.CreatedAt.Add(defaultJobExpiration)
+// CreateBatchJob creates a new batch job and returns its ID.
+func (s *RedisStorage) CreateBatchJob(urls []string, invalidURLs []string) (string, error) {
+	jobID := uuid.New().String()
+	key := batchJobKeyPrefix + jobID
 
-	// Serialize the job
+	job := model.BatchScrapeStatus{
+		Status:    "pending",
+		Total:     len(urls),
+		Completed: 0,
+		ExpiresAt: time.Now().Add(s.jobExpirationTime).Format(time.RFC3339),
+	}
+
+	// Store invalid URLs if any
+	if len(invalidURLs) > 0 {
+		job.Status = "partial"
+	}
+
 	jobData, err := json.Marshal(job)
 	if err != nil {
-		return fmt.Errorf("failed to marshal job: %w", err)
+		return "", fmt.Errorf("failed to marshal job data: %w", err)
 	}
 
-	// Store the job in Redis
-	jobKey := fmt.Sprintf("%s%s", jobKeyPrefix, job.ID)
-
-	// Use a pipeline to execute multiple commands atomically
-	pipe := s.client.Pipeline()
-
-	// Store the job data with expiration
-	pipe.Set(ctx, jobKey, jobData, defaultJobExpiration)
-
-	// Add the job ID to the list of jobs
-	pipe.LPush(ctx, jobListKey, job.ID)
-
-	// Execute the pipeline
-	_, err = pipe.Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to store job in Redis: %w", err)
+	if err := s.client.Set(s.ctx, key, jobData, s.jobExpirationTime).Err(); err != nil {
+		return "", fmt.Errorf("failed to store job in Redis: %w", err)
 	}
 
-	return nil
+	return jobID, nil
 }
 
-// GetJob retrieves a job from Redis by ID
-func (s *RedisJobStore) GetJob(ctx context.Context, id string) (*models.BatchJob, error) {
-	jobKey := fmt.Sprintf("%s%s", jobKeyPrefix, id)
+// GetBatchJob retrieves a batch job by ID.
+func (s *RedisStorage) GetBatchJob(jobID string) (*model.BatchScrapeStatus, error) {
+	key := batchJobKeyPrefix + jobID
 
-	// Get the job data from Redis
-	jobData, err := s.client.Get(ctx, jobKey).Bytes()
+	jobData, err := s.client.Get(s.ctx, key).Result()
 	if err != nil {
-		if err == redis.Nil {
-			return nil, errors.New("job not found")
+		if errors.Is(err, redis.Nil) {
+			return nil, fmt.Errorf("job not found: %s", jobID)
 		}
 		return nil, fmt.Errorf("failed to get job from Redis: %w", err)
 	}
 
-	// Deserialize the job
-	var job models.BatchJob
-	if err := json.Unmarshal(jobData, &job); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal job: %w", err)
+	var job model.BatchScrapeStatus
+	if err := json.Unmarshal([]byte(jobData), &job); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal job data: %w", err)
 	}
 
 	return &job, nil
 }
 
-// UpdateJob updates an existing job in Redis
-func (s *RedisJobStore) UpdateJob(ctx context.Context, job models.BatchJob) error {
-	// Update the job's update time
-	job.UpdatedAt = time.Now()
+// UpdateBatchJob updates a batch job with new results.
+func (s *RedisStorage) UpdateBatchJob(jobID string, result model.ScrapeResult) error {
+	key := batchJobKeyPrefix + jobID
 
-	// Serialize the job
+	// Get current job data
+	job, err := s.GetBatchJob(jobID)
+	if err != nil {
+		return err
+	}
+
+	// Update job data
+	job.Completed++
+	job.Data = append(job.Data, result)
+	job.CreditsUsed = job.Completed
+
+	// Update status if completed
+	if job.Completed >= job.Total {
+		job.Status = "completed"
+	}
+
+	// Save updated job data
 	jobData, err := json.Marshal(job)
 	if err != nil {
-		return fmt.Errorf("failed to marshal job: %w", err)
+		return fmt.Errorf("failed to marshal updated job data: %w", err)
 	}
 
-	// Store the job in Redis
-	jobKey := fmt.Sprintf("%s%s", jobKeyPrefix, job.ID)
-
-	// Calculate the remaining TTL
-	ttl := job.ExpiresAt.Sub(time.Now())
-	if ttl <= 0 {
-		ttl = defaultJobExpiration
-	}
-
-	// Update the job data with the same expiration
-	err = s.client.Set(ctx, jobKey, jobData, ttl).Err()
-	if err != nil {
+	if err := s.client.Set(s.ctx, key, jobData, s.jobExpirationTime).Err(); err != nil {
 		return fmt.Errorf("failed to update job in Redis: %w", err)
 	}
 
 	return nil
 }
 
-// ListJobs returns a list of all jobs
-func (s *RedisJobStore) ListJobs(ctx context.Context) ([]models.BatchJob, error) {
-	// Get all job IDs from the list
-	jobIDs, err := s.client.LRange(ctx, jobListKey, 0, -1).Result()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list jobs from Redis: %w", err)
-	}
-
-	jobs := make([]models.BatchJob, 0, len(jobIDs))
-
-	// Get each job by ID
-	for _, id := range jobIDs {
-		job, err := s.GetJob(ctx, id)
-		if err != nil {
-			// Skip jobs that can't be retrieved
-			continue
-		}
-		jobs = append(jobs, *job)
-	}
-
-	return jobs, nil
-}
-
-// Close closes the Redis connection
-func (s *RedisJobStore) Close() error {
+// Close closes the Redis connection.
+func (s *RedisStorage) Close() error {
 	return s.client.Close()
 }
