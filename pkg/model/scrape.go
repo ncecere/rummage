@@ -60,10 +60,9 @@ type BatchScrapeResponse struct {
 
 // BatchScrapeStatus represents the status of a batch scrape job.
 type BatchScrapeStatus struct {
-	Status      string         `json:"status"`
-	Total       int            `json:"total"`
-	Completed   int            `json:"completed"`
-	CreditsUsed int            `json:"creditsUsed"`
-	ExpiresAt   string         `json:"expiresAt"`
-	Data        []ScrapeResult `json:"data,omitempty"`
+	Status    string         `json:"status"`
+	Total     int            `json:"total"`
+	Completed int            `json:"completed"`
+	ExpiresAt string         `json:"expiresAt"`
+	Data      []ScrapeResult `json:"data,omitempty"`
 }

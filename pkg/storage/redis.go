@@ -130,7 +130,6 @@ func (s *RedisStorage) UpdateBatchJob(jobID string, result model.ScrapeResult) e
 	// Update job data
 	job.Completed++
 	job.Data = append(job.Data, result)
-	job.CreditsUsed = job.Completed
 
 	// Update status if completed
 	if job.Completed >= job.Total {

@@ -25,11 +25,10 @@ func (m *MockRedisStorage) CreateBatchJob(urls []string, invalidURLs []string) (
 	jobID := "mock-job-id"
 
 	m.jobs[jobID] = model.BatchScrapeStatus{
-		Status:      "pending",
-		Total:       len(urls),
-		Completed:   0,
-		CreditsUsed: 0,
-		ExpiresAt:   time.Now().Add(1 * time.Hour).Format(time.RFC3339),
+		Status:    "pending",
+		Total:     len(urls),
+		Completed: 0,
+		ExpiresAt: time.Now().Add(1 * time.Hour).Format(time.RFC3339),
 	}
 
 	return jobID, nil
@@ -53,7 +52,6 @@ func (m *MockRedisStorage) UpdateBatchJob(jobID string, result model.ScrapeResul
 	}
 
 	job.Completed++
-	job.CreditsUsed = job.Completed
 	job.Data = append(job.Data, result)
 
 	if job.Completed >= job.Total {
@@ -175,9 +173,6 @@ func TestMockRedisStorage_UpdateBatchJob(t *testing.T) {
 	// Verify job data
 	if job.Completed != 1 {
 		t.Errorf("Expected completed 1, got %d", job.Completed)
-	}
-	if job.CreditsUsed != 1 {
-		t.Errorf("Expected credits used 1, got %d", job.CreditsUsed)
 	}
 	if len(job.Data) != 1 {
 		t.Errorf("Expected 1 result, got %d", len(job.Data))
