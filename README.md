@@ -18,6 +18,7 @@ Rummage is a web scraping API service built in Go that provides functionality si
 - **Content Filtering**: Extract only the main content or specific HTML tags
 - **Asynchronous Processing**: Process batch jobs in the background
 - **Redis Storage**: Store and retrieve batch job results
+- **Flexible Configuration**: Configure via YAML files or environment variables
 
 ## Project Structure
 
@@ -27,6 +28,10 @@ The project follows a modular design with clear separation of concerns:
 rummage/
 ├── cmd/                  # Application entry points
 │   └── rummage/          # Main application
+├── config/               # Configuration files
+│   ├── config.yaml       # Default configuration
+│   ├── minimal.yaml      # Minimal configuration example
+│   └── full.yaml         # Full configuration example
 ├── pkg/                  # Reusable packages
 │   ├── api/              # HTTP API handlers and router
 │   ├── config/           # Configuration management
@@ -71,7 +76,75 @@ make run
 docker-compose up
 ```
 
-By default, the server listens on port 8080. You can change this by setting the `PORT` environment variable.
+By default, the server listens on port 8080. You can change this using configuration files or environment variables.
+
+## Configuration
+
+Rummage uses [Viper](https://github.com/spf13/viper) for configuration management, which provides flexibility in how you configure the application.
+
+### Configuration Files
+
+The application looks for a `config.yaml` file in the following locations:
+- Current directory (`./`)
+- Config directory (`./config/`)
+- System config directory (`/etc/rummage/`)
+- User home directory (`$HOME/.rummage/`)
+
+### Configuration Options
+
+#### Minimal Configuration Example
+
+```yaml
+# Minimal Rummage Configuration
+server:
+  port: 8080
+
+redis:
+  url: redis://localhost:6379
+```
+
+#### Full Configuration Example
+
+```yaml
+# Full Rummage Configuration
+
+# Server configuration
+server:
+  # Port to listen on
+  port: 8080
+  # Base URL for API responses
+  baseURL: http://localhost:8080
+
+# Redis configuration
+redis:
+  # Redis connection URL (redis://host:port)
+  url: redis://localhost:6379
+
+# Scraper configuration
+scraper:
+  # Default timeout for scraping requests in milliseconds
+  defaultTimeoutMS: 30000
+  # Default wait time before scraping in milliseconds
+  defaultWaitTimeMS: 1000
+  # Maximum number of concurrent scraping jobs
+  maxConcurrentJobs: 10
+  # Hours until batch jobs expire
+  jobExpirationHours: 24
+```
+
+### Environment Variables
+
+All configuration options can also be set using environment variables with the `RUMMAGE_` prefix and using underscores to separate nested keys:
+
+- `RUMMAGE_SERVER_PORT`: The port to listen on (default: `8080`)
+- `RUMMAGE_SERVER_BASEURL`: The base URL of the API (default: `http://localhost:PORT`)
+- `RUMMAGE_REDIS_URL`: The URL of the Redis server (default: `redis://localhost:6379`)
+- `RUMMAGE_SCRAPER_DEFAULTTIMEOUTMS`: Default request timeout in milliseconds (default: `30000`)
+- `RUMMAGE_SCRAPER_DEFAULTWAITTIMEMS`: Default wait time in milliseconds (default: `0`)
+- `RUMMAGE_SCRAPER_MAXCONCURRENTJOBS`: Maximum number of concurrent batch jobs (default: `10`)
+- `RUMMAGE_SCRAPER_JOBEXPIRATIONHOURS`: Hours until batch jobs expire (default: `24`)
+
+Environment variables take precedence over configuration files.
 
 ## Development
 
@@ -241,15 +314,10 @@ docker-compose up -d
 docker-compose down
 ```
 
-## Environment Variables
-
-- `PORT`: The port to listen on (default: `8080`)
-- `REDIS_URL`: The URL of the Redis server (default: `localhost:6379`)
-- `BASE_URL`: The base URL of the API (default: `http://localhost:PORT`)
-- `DEFAULT_TIMEOUT_MS`: Default request timeout in milliseconds (default: `30000`)
-- `DEFAULT_WAIT_TIME_MS`: Default wait time in milliseconds (default: `0`)
-- `MAX_CONCURRENT_JOBS`: Maximum number of concurrent batch jobs (default: `10`)
-- `JOB_EXPIRATION_HOURS`: Hours until batch jobs expire (default: `24`)
+The Docker configuration includes:
+- Mounting the config directory for easy configuration
+- Setting environment variables for customization
+- Connecting to a Redis container for batch processing
 
 ## Testing
 
@@ -270,3 +338,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgments
 
 - Inspired by [Firecrawl](https://firecrawl.dev)
+- Uses [Viper](https://github.com/spf13/viper) for configuration management

@@ -2,9 +2,11 @@
 package config
 
 import (
-	"os"
-	"strconv"
+	"fmt"
+	"strings"
 	"time"
+
+	"github.com/spf13/viper"
 )
 
 // Config represents the application configuration.
@@ -23,66 +25,60 @@ type Config struct {
 	JobExpirationHours int
 }
 
-// LoadConfig loads the configuration from environment variables.
-func LoadConfig() *Config {
-	cfg := &Config{
-		// Server configuration
-		Port:    getEnv("PORT", "8080"),
-		BaseURL: getEnv("BASE_URL", ""),
+// LoadConfig loads the configuration from environment variables and config files.
+func LoadConfig() (*Config, error) {
+	v := viper.New()
 
-		// Redis configuration
-		RedisURL: getEnv("REDIS_URL", "redis://localhost:6379"),
+	// Set default values
+	v.SetDefault("server.port", "8080")
+	v.SetDefault("server.baseURL", "")
+	v.SetDefault("redis.url", "redis://localhost:6379")
+	v.SetDefault("scraper.defaultTimeoutMS", 30000)
+	v.SetDefault("scraper.defaultWaitTimeMS", 0)
+	v.SetDefault("scraper.maxConcurrentJobs", 10)
+	v.SetDefault("scraper.jobExpirationHours", 24)
 
-		// Scraper configuration
-		DefaultTimeout:     time.Duration(getEnvAsInt("DEFAULT_TIMEOUT_MS", 30000)) * time.Millisecond,
-		DefaultWaitTime:    time.Duration(getEnvAsInt("DEFAULT_WAIT_TIME_MS", 0)) * time.Millisecond,
-		MaxConcurrentJobs:  getEnvAsInt("MAX_CONCURRENT_JOBS", 10),
-		JobExpirationHours: getEnvAsInt("JOB_EXPIRATION_HOURS", 24),
+	// Set environment variable prefix and bind environment variables
+	v.SetEnvPrefix("RUMMAGE")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	// Read config file
+	v.SetConfigName("config")
+	v.SetConfigType("yaml")
+	v.AddConfigPath(".")
+	v.AddConfigPath("./config")
+	v.AddConfigPath("/etc/rummage")
+	v.AddConfigPath("$HOME/.rummage")
+
+	// Read config file if it exists
+	if err := v.ReadInConfig(); err != nil {
+		// It's okay if config file doesn't exist
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			return nil, fmt.Errorf("failed to read config file: %w", err)
+		}
 	}
 
-	// If BASE_URL is not set, derive it from PORT
+	// Create config struct
+	cfg := &Config{
+		// Server configuration
+		Port:    v.GetString("server.port"),
+		BaseURL: v.GetString("server.baseURL"),
+
+		// Redis configuration
+		RedisURL: v.GetString("redis.url"),
+
+		// Scraper configuration
+		DefaultTimeout:     time.Duration(v.GetInt("scraper.defaultTimeoutMS")) * time.Millisecond,
+		DefaultWaitTime:    time.Duration(v.GetInt("scraper.defaultWaitTimeMS")) * time.Millisecond,
+		MaxConcurrentJobs:  v.GetInt("scraper.maxConcurrentJobs"),
+		JobExpirationHours: v.GetInt("scraper.jobExpirationHours"),
+	}
+
+	// If BaseURL is not set, derive it from Port
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "http://localhost:" + cfg.Port
 	}
 
-	return cfg
-}
-
-// getEnv gets an environment variable or returns a default value.
-func getEnv(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
-}
-
-// getEnvAsInt gets an environment variable as an integer or returns a default value.
-func getEnvAsInt(key string, defaultValue int) int {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := strconv.Atoi(valueStr)
-	if err != nil {
-		return defaultValue
-	}
-
-	return value
-}
-
-// getEnvAsBool gets an environment variable as a boolean or returns a default value.
-func getEnvAsBool(key string, defaultValue bool) bool {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-
-	value, err := strconv.ParseBool(valueStr)
-	if err != nil {
-		return defaultValue
-	}
-
-	return value
+	return cfg, nil
 }

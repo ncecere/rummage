@@ -1,0 +1,24 @@
+# Full Rummage Configuration
+
+# Server configuration
+server:
+  # Port to listen on
+  port: 8080
+  # Base URL for API responses
+  baseURL: http://localhost:8080
+
+# Redis configuration
+redis:
+  # Redis connection URL (redis://host:port)
+  url: redis://localhost:6379
+
+# Scraper configuration
+scraper:
+  # Default timeout for scraping requests in milliseconds
+  defaultTimeoutMS: 30000
+  # Default wait time before scraping in milliseconds
+  defaultWaitTimeMS: 1000
+  # Maximum number of concurrent scraping jobs
+  maxConcurrentJobs: 10
+  # Hours until batch jobs expire
+  jobExpirationHours: 24

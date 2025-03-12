@@ -35,7 +35,10 @@ type RedisStorage struct {
 // NewRedisStorage creates a new Redis storage instance.
 func NewRedisStorage(redisURL string) (*RedisStorage, error) {
 	// Load config for default values
-	cfg := config.LoadConfig()
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load configuration: %w", err)
+	}
 
 	return NewRedisStorageWithOptions(StorageOptions{
 		RedisURL:          redisURL,

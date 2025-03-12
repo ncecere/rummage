@@ -8,37 +8,40 @@ import (
 
 func TestLoadConfig(t *testing.T) {
 	// Save original environment variables to restore later
-	origPort := os.Getenv("PORT")
-	origBaseURL := os.Getenv("BASE_URL")
-	origRedisURL := os.Getenv("REDIS_URL")
-	origDefaultTimeout := os.Getenv("DEFAULT_TIMEOUT_MS")
-	origDefaultWaitTime := os.Getenv("DEFAULT_WAIT_TIME_MS")
-	origMaxConcurrentJobs := os.Getenv("MAX_CONCURRENT_JOBS")
-	origJobExpirationHours := os.Getenv("JOB_EXPIRATION_HOURS")
+	origPort := os.Getenv("RUMMAGE_SERVER_PORT")
+	origBaseURL := os.Getenv("RUMMAGE_SERVER_BASEURL")
+	origRedisURL := os.Getenv("RUMMAGE_REDIS_URL")
+	origDefaultTimeout := os.Getenv("RUMMAGE_SCRAPER_DEFAULTTIMEOUTMS")
+	origDefaultWaitTime := os.Getenv("RUMMAGE_SCRAPER_DEFAULTWAITTIMEMS")
+	origMaxConcurrentJobs := os.Getenv("RUMMAGE_SCRAPER_MAXCONCURRENTJOBS")
+	origJobExpirationHours := os.Getenv("RUMMAGE_SCRAPER_JOBEXPIRATIONHOURS")
 
 	// Restore environment variables after the test
 	defer func() {
-		os.Setenv("PORT", origPort)
-		os.Setenv("BASE_URL", origBaseURL)
-		os.Setenv("REDIS_URL", origRedisURL)
-		os.Setenv("DEFAULT_TIMEOUT_MS", origDefaultTimeout)
-		os.Setenv("DEFAULT_WAIT_TIME_MS", origDefaultWaitTime)
-		os.Setenv("MAX_CONCURRENT_JOBS", origMaxConcurrentJobs)
-		os.Setenv("JOB_EXPIRATION_HOURS", origJobExpirationHours)
+		os.Setenv("RUMMAGE_SERVER_PORT", origPort)
+		os.Setenv("RUMMAGE_SERVER_BASEURL", origBaseURL)
+		os.Setenv("RUMMAGE_REDIS_URL", origRedisURL)
+		os.Setenv("RUMMAGE_SCRAPER_DEFAULTTIMEOUTMS", origDefaultTimeout)
+		os.Setenv("RUMMAGE_SCRAPER_DEFAULTWAITTIMEMS", origDefaultWaitTime)
+		os.Setenv("RUMMAGE_SCRAPER_MAXCONCURRENTJOBS", origMaxConcurrentJobs)
+		os.Setenv("RUMMAGE_SCRAPER_JOBEXPIRATIONHOURS", origJobExpirationHours)
 	}()
 
 	// Test with default values
 	t.Run("Default values", func(t *testing.T) {
 		// Clear environment variables
-		os.Unsetenv("PORT")
-		os.Unsetenv("BASE_URL")
-		os.Unsetenv("REDIS_URL")
-		os.Unsetenv("DEFAULT_TIMEOUT_MS")
-		os.Unsetenv("DEFAULT_WAIT_TIME_MS")
-		os.Unsetenv("MAX_CONCURRENT_JOBS")
-		os.Unsetenv("JOB_EXPIRATION_HOURS")
+		os.Unsetenv("RUMMAGE_SERVER_PORT")
+		os.Unsetenv("RUMMAGE_SERVER_BASEURL")
+		os.Unsetenv("RUMMAGE_REDIS_URL")
+		os.Unsetenv("RUMMAGE_SCRAPER_DEFAULTTIMEOUTMS")
+		os.Unsetenv("RUMMAGE_SCRAPER_DEFAULTWAITTIMEMS")
+		os.Unsetenv("RUMMAGE_SCRAPER_MAXCONCURRENTJOBS")
+		os.Unsetenv("RUMMAGE_SCRAPER_JOBEXPIRATIONHOURS")
 
-		cfg := LoadConfig()
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("Failed to load config: %v", err)
+		}
 
 		// Check default values
 		if cfg.Port != "8080" {
@@ -47,8 +50,8 @@ func TestLoadConfig(t *testing.T) {
 		if cfg.BaseURL != "http://localhost:8080" {
 			t.Errorf("Expected default BaseURL to be 'http://localhost:8080', got '%s'", cfg.BaseURL)
 		}
-		if cfg.RedisURL != "localhost:6379" {
-			t.Errorf("Expected default RedisURL to be 'localhost:6379', got '%s'", cfg.RedisURL)
+		if cfg.RedisURL != "redis://localhost:6379" {
+			t.Errorf("Expected default RedisURL to be 'redis://localhost:6379', got '%s'", cfg.RedisURL)
 		}
 		if cfg.DefaultTimeout != 30000*time.Millisecond {
 			t.Errorf("Expected default DefaultTimeout to be 30000ms, got '%v'", cfg.DefaultTimeout)
@@ -67,15 +70,18 @@ func TestLoadConfig(t *testing.T) {
 	// Test with custom values
 	t.Run("Custom values", func(t *testing.T) {
 		// Set environment variables
-		os.Setenv("PORT", "3000")
-		os.Setenv("BASE_URL", "https://example.com")
-		os.Setenv("REDIS_URL", "redis:6379")
-		os.Setenv("DEFAULT_TIMEOUT_MS", "5000")
-		os.Setenv("DEFAULT_WAIT_TIME_MS", "1000")
-		os.Setenv("MAX_CONCURRENT_JOBS", "5")
-		os.Setenv("JOB_EXPIRATION_HOURS", "48")
+		os.Setenv("RUMMAGE_SERVER_PORT", "3000")
+		os.Setenv("RUMMAGE_SERVER_BASEURL", "https://example.com")
+		os.Setenv("RUMMAGE_REDIS_URL", "redis://redis:6379")
+		os.Setenv("RUMMAGE_SCRAPER_DEFAULTTIMEOUTMS", "5000")
+		os.Setenv("RUMMAGE_SCRAPER_DEFAULTWAITTIMEMS", "1000")
+		os.Setenv("RUMMAGE_SCRAPER_MAXCONCURRENTJOBS", "5")
+		os.Setenv("RUMMAGE_SCRAPER_JOBEXPIRATIONHOURS", "48")
 
-		cfg := LoadConfig()
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("Failed to load config: %v", err)
+		}
 
 		// Check custom values
 		if cfg.Port != "3000" {
@@ -84,8 +90,8 @@ func TestLoadConfig(t *testing.T) {
 		if cfg.BaseURL != "https://example.com" {
 			t.Errorf("Expected BaseURL to be 'https://example.com', got '%s'", cfg.BaseURL)
 		}
-		if cfg.RedisURL != "redis:6379" {
-			t.Errorf("Expected RedisURL to be 'redis:6379', got '%s'", cfg.RedisURL)
+		if cfg.RedisURL != "redis://redis:6379" {
+			t.Errorf("Expected RedisURL to be 'redis://redis:6379', got '%s'", cfg.RedisURL)
 		}
 		if cfg.DefaultTimeout != 5000*time.Millisecond {
 			t.Errorf("Expected DefaultTimeout to be 5000ms, got '%v'", cfg.DefaultTimeout)
@@ -104,10 +110,13 @@ func TestLoadConfig(t *testing.T) {
 	// Test with invalid values
 	t.Run("Invalid values", func(t *testing.T) {
 		// Set environment variables with invalid values
-		os.Setenv("DEFAULT_TIMEOUT_MS", "invalid")
-		os.Setenv("MAX_CONCURRENT_JOBS", "invalid")
+		os.Setenv("RUMMAGE_SCRAPER_DEFAULTTIMEOUTMS", "invalid")
+		os.Setenv("RUMMAGE_SCRAPER_MAXCONCURRENTJOBS", "invalid")
 
-		cfg := LoadConfig()
+		cfg, err := LoadConfig()
+		if err != nil {
+			t.Fatalf("Failed to load config: %v", err)
+		}
 
 		// Check that default values are used for invalid inputs
 		if cfg.DefaultTimeout != 30000*time.Millisecond {
@@ -117,34 +126,4 @@ func TestLoadConfig(t *testing.T) {
 			t.Errorf("Expected MaxConcurrentJobs to fall back to default 10 for invalid input, got '%d'", cfg.MaxConcurrentJobs)
 		}
 	})
-}
-
-func TestGetEnvAsBool(t *testing.T) {
-	// Save original environment variable to restore later
-	origValue := os.Getenv("TEST_BOOL")
-	defer os.Setenv("TEST_BOOL", origValue)
-
-	// Test with true value
-	os.Setenv("TEST_BOOL", "true")
-	if !getEnvAsBool("TEST_BOOL", false) {
-		t.Errorf("Expected getEnvAsBool to return true for 'true' value")
-	}
-
-	// Test with false value
-	os.Setenv("TEST_BOOL", "false")
-	if getEnvAsBool("TEST_BOOL", true) {
-		t.Errorf("Expected getEnvAsBool to return false for 'false' value")
-	}
-
-	// Test with invalid value
-	os.Setenv("TEST_BOOL", "invalid")
-	if !getEnvAsBool("TEST_BOOL", true) {
-		t.Errorf("Expected getEnvAsBool to return default value (true) for invalid input")
-	}
-
-	// Test with missing value
-	os.Unsetenv("TEST_BOOL")
-	if !getEnvAsBool("TEST_BOOL", true) {
-		t.Errorf("Expected getEnvAsBool to return default value (true) for missing env var")
-	}
 }

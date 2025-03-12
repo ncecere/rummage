@@ -32,9 +32,16 @@ COPY --from=builder /app/rummage .
 EXPOSE 8080
 
 # Set environment variables
-ENV PORT=8080
-ENV REDIS_URL=redis:6379
-ENV BASE_URL=http://localhost:8080
+ENV RUMMAGE_SERVER_PORT=8080
+ENV RUMMAGE_REDIS_URL=redis://redis:6379
+ENV RUMMAGE_SERVER_BASEURL=http://localhost:8080
+
+# Create config directory
+RUN mkdir -p /app/config
+WORKDIR /app
+
+# Copy config file
+COPY config/ /app/config/
 
 # Command to run the executable
-CMD ["./rummage"]
+CMD ["/root/rummage"]

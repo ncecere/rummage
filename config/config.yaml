@@ -1,0 +1,17 @@
+# Rummage Configuration
+
+# Server configuration
+server:
+  port: 8080
+  baseURL: http://localhost:8080
+
+# Redis configuration
+redis:
+  url: redis://localhost:6379
+
+# Scraper configuration
+scraper:
+  defaultTimeoutMS: 30000
+  defaultWaitTimeMS: 0
+  maxConcurrentJobs: 10
+  jobExpirationHours: 24
