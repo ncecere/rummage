@@ -59,7 +59,7 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
-	// Create config struct
+	// Create config struct with default values
 	cfg := &Config{
 		// Server configuration
 		Port:    v.GetString("server.port"),
@@ -69,10 +69,10 @@ func LoadConfig() (*Config, error) {
 		RedisURL: v.GetString("redis.url"),
 
 		// Scraper configuration
-		DefaultTimeout:     time.Duration(v.GetInt("scraper.defaultTimeoutMS")) * time.Millisecond,
-		DefaultWaitTime:    time.Duration(v.GetInt("scraper.defaultWaitTimeMS")) * time.Millisecond,
-		MaxConcurrentJobs:  v.GetInt("scraper.maxConcurrentJobs"),
-		JobExpirationHours: v.GetInt("scraper.jobExpirationHours"),
+		DefaultTimeout:     time.Duration(getIntWithDefault(v, "scraper.defaultTimeoutMS", 30000)) * time.Millisecond,
+		DefaultWaitTime:    time.Duration(getIntWithDefault(v, "scraper.defaultWaitTimeMS", 0)) * time.Millisecond,
+		MaxConcurrentJobs:  getIntWithDefault(v, "scraper.maxConcurrentJobs", 10),
+		JobExpirationHours: getIntWithDefault(v, "scraper.jobExpirationHours", 24),
 	}
 
 	// If BaseURL is not set, derive it from Port
@@ -81,4 +81,26 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// getIntWithDefault gets an integer value from Viper, falling back to the provided default if the value is invalid.
+func getIntWithDefault(v *viper.Viper, key string, defaultValue int) int {
+	// Check if the key exists and is a valid integer
+	if v.IsSet(key) {
+		// Try to get the value as a string first
+		strValue := v.GetString(key)
+		// If it's not a valid integer, return the default
+		if _, err := fmt.Sscanf(strValue, "%d", &defaultValue); err != nil {
+			return defaultValue
+		}
+	}
+
+	// Get the value as an int
+	value := v.GetInt(key)
+	if value == 0 && v.GetString(key) != "0" {
+		// If the value is 0 but the string representation is not "0", it's likely invalid
+		return defaultValue
+	}
+
+	return value
 }
