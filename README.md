@@ -9,6 +9,8 @@ Rummage is a web scraping API service built in Go that provides functionality si
 ## Features
 
 - **Scrape Endpoint**: Extract content from any URL
+- **Map Endpoint**: Discover URLs from a starting point using sitemap.xml and HTML links
+- **Crawl Endpoint**: Recursively crawl websites and scrape all accessible subpages
 - **Batch Scraping**: Process multiple URLs asynchronously
 - **Multiple Output Formats**:
   - `markdown`: Convert HTML to markdown (default)
@@ -35,6 +37,7 @@ rummage/
 ├── pkg/                  # Reusable packages
 │   ├── api/              # HTTP API handlers and router
 │   ├── config/           # Configuration management
+│   ├── crawler/          # Website crawling functionality
 │   ├── model/            # Data models
 │   ├── scraper/          # Web scraping functionality
 │   ├── storage/          # Data persistence (Redis)
@@ -213,6 +216,168 @@ curl --request POST \
       "statusCode": 200
     }
   }
+}
+```
+
+### Map Endpoint
+
+The Map endpoint discovers URLs from a starting point, using both sitemap.xml and HTML link discovery.
+
+```bash
+curl --request POST \
+  --url http://localhost:8080/v1/map \
+  --header 'Content-Type: application/json' \
+  --data '{
+  "url": "https://example.com",
+  "search": "blog",
+  "ignoreSitemap": false,
+  "sitemapOnly": false,
+  "includeSubdomains": false,
+  "limit": 100
+}'
+```
+
+#### Request Parameters
+
+- `url` (required): Starting URL for URL discovery
+- `search`: Optional search term to filter URLs
+- `ignoreSitemap`: Skip sitemap.xml discovery and only use HTML links
+- `sitemapOnly`: Only use sitemap.xml for discovery, ignore HTML links
+- `includeSubdomains`: Include URLs from subdomains in results
+- `limit`: Maximum number of URLs to return
+
+#### Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "links": [
+      "https://example.com/page1",
+      "https://example.com/page2",
+      "https://example.com/blog/post1"
+    ]
+  }
+}
+```
+
+### Crawl Endpoint
+
+The Crawl endpoint recursively crawls a website, discovering and scraping all accessible subpages.
+
+```bash
+curl --request POST \
+  --url http://localhost:8080/v1/crawl \
+  --header 'Content-Type: application/json' \
+  --data '{
+  "url": "https://example.com",
+  "excludePaths": ["/admin", "/private"],
+  "includePaths": ["/blog", "/docs"],
+  "maxDepth": 3,
+  "ignoreSitemap": false,
+  "ignoreQueryParameters": true,
+  "limit": 100,
+  "allowBackwardLinks": false,
+  "allowExternalLinks": false,
+  "scrapeOptions": {
+    "formats": ["markdown"],
+    "onlyMainContent": true
+  }
+}'
+```
+
+#### Request Parameters
+
+- `url` (required): The URL to crawl
+- `excludePaths`: Array of URL paths to exclude from crawling
+- `includePaths`: Only crawl these URL paths
+- `maxDepth`: Maximum link depth to crawl (default: 10)
+- `ignoreSitemap`: Skip sitemap.xml discovery (default: false)
+- `ignoreQueryParameters`: Ignore query parameters when comparing URLs (default: false)
+- `limit`: Maximum number of pages to crawl (default: 1000)
+- `allowBackwardLinks`: Allow crawling links that point to parent directories (default: false)
+- `allowExternalLinks`: Allow crawling links to external domains (default: false)
+- `scrapeOptions`: Options for scraping each page (same as Scrape endpoint)
+
+#### Response
+
+```json
+{
+  "success": true,
+  "id": "job-id",
+  "url": "http://localhost:8080/v1/crawl/job-id"
+}
+```
+
+### Get Crawl Status
+
+```bash
+curl --request GET \
+  --url http://localhost:8080/v1/crawl/job-id
+```
+
+#### Response
+
+```json
+{
+  "status": "scraping",
+  "total": 36,
+  "completed": 10,
+  "expiresAt": "2025-03-11T10:36:14Z",
+  "data": [
+    {
+      "markdown": "...",
+      "html": "...",
+      "links": ["..."],
+      "metadata": {
+        "title": "...",
+        "description": "...",
+        "language": "...",
+        "sourceURL": "...",
+        "statusCode": 200
+      }
+    }
+  ]
+}
+```
+
+### Cancel Crawl
+
+```bash
+curl --request DELETE \
+  --url http://localhost:8080/v1/crawl/job-id
+```
+
+#### Response
+
+```json
+{
+  "status": "cancelled"
+}
+```
+
+### Get Crawl Errors
+
+```bash
+curl --request GET \
+  --url http://localhost:8080/v1/crawl/job-id/errors
+```
+
+#### Response
+
+```json
+{
+  "errors": [
+    {
+      "id": "error-id",
+      "timestamp": "2025-03-11T10:36:14Z",
+      "url": "https://example.com/broken-page",
+      "error": "Failed to scrape URL: 404 Not Found"
+    }
+  ],
+  "robotsBlocked": [
+    "https://example.com/robots-blocked-page"
+  ]
 }
 ```
 
