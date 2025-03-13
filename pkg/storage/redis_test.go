@@ -10,13 +10,17 @@ import (
 
 // MockRedisStorage is a mock implementation of the RedisStorage for testing
 type MockRedisStorage struct {
-	jobs map[string]model.BatchScrapeStatus
+	jobs          map[string]model.BatchScrapeStatus
+	crawlErrors   map[string][]model.CrawlError
+	robotsBlocked map[string][]string
 }
 
 // NewMockRedisStorage creates a new mock Redis storage instance
 func NewMockRedisStorage() *MockRedisStorage {
 	return &MockRedisStorage{
-		jobs: make(map[string]model.BatchScrapeStatus),
+		jobs:          make(map[string]model.BatchScrapeStatus),
+		crawlErrors:   make(map[string][]model.CrawlError),
+		robotsBlocked: make(map[string][]string),
 	}
 }
 

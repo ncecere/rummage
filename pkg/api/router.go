@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/ncecere/rummage/pkg/crawler"
 	"github.com/ncecere/rummage/pkg/model"
 	"github.com/ncecere/rummage/pkg/scraper"
 	"github.com/ncecere/rummage/pkg/storage"
@@ -21,6 +22,7 @@ type RouterOptions struct {
 type Router struct {
 	*mux.Router
 	scraper *scraper.Service
+	crawler *crawler.Service
 	storage *storage.RedisStorage
 	baseURL string
 }
@@ -36,10 +38,18 @@ func NewRouter(opts RouterOptions) (*mux.Router, error) {
 	// Initialize scraper service
 	scraperService := scraper.NewService()
 
+	// Initialize crawler service
+	crawlerService := crawler.NewService(crawler.ServiceOptions{
+		BaseURL:           opts.BaseURL,
+		UpdateJobFn:       redisStorage.UpdateCrawlJob,
+		UpdateJobStatusFn: redisStorage.UpdateCrawlJobStatus,
+	})
+
 	// Create router instance
 	r := &Router{
 		Router:  mux.NewRouter(),
 		scraper: scraperService,
+		crawler: crawlerService,
 		storage: redisStorage,
 		baseURL: opts.BaseURL,
 	}
@@ -62,6 +72,12 @@ func (r *Router) registerRoutes() {
 	api.HandleFunc("/scrape", r.handleScrape).Methods(http.MethodPost)
 	api.HandleFunc("/batch/scrape", r.handleBatchScrape).Methods(http.MethodPost)
 	api.HandleFunc("/batch/scrape/{id}", r.handleGetBatchStatus).Methods(http.MethodGet)
+
+	// Crawl endpoints
+	api.HandleFunc("/crawl", r.handleCrawl).Methods(http.MethodPost)
+	api.HandleFunc("/crawl/{id}", r.handleGetCrawlStatus).Methods(http.MethodGet)
+	api.HandleFunc("/crawl/{id}", r.handleCancelCrawl).Methods(http.MethodDelete)
+	api.HandleFunc("/crawl/{id}/errors", r.handleGetCrawlErrors).Methods(http.MethodGet)
 }
 
 // handleHealth is a simple health check endpoint.
