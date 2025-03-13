@@ -78,6 +78,9 @@ func (r *Router) registerRoutes() {
 	api.HandleFunc("/crawl/{id}", r.handleGetCrawlStatus).Methods(http.MethodGet)
 	api.HandleFunc("/crawl/{id}", r.handleCancelCrawl).Methods(http.MethodDelete)
 	api.HandleFunc("/crawl/{id}/errors", r.handleGetCrawlErrors).Methods(http.MethodGet)
+
+	// Map endpoints
+	api.HandleFunc("/map", r.handleMap).Methods(http.MethodPost)
 }
 
 // handleHealth is a simple health check endpoint.
