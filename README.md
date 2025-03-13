@@ -484,6 +484,43 @@ The Docker configuration includes:
 - Setting environment variables for customization
 - Connecting to a Redis container for batch processing
 
+### Using the GitHub Container Registry
+
+You can also pull the Docker image directly from the GitHub Container Registry:
+
+```bash
+# Pull the latest version
+docker pull ghcr.io/ncecere/rummage:latest
+
+# Pull a specific version
+docker pull ghcr.io/ncecere/rummage:v1.0.0
+
+# Run the container
+docker run -p 8080:8080 ghcr.io/ncecere/rummage:latest
+```
+
+## Releases
+
+Rummage binaries are available for download from the [GitHub Releases](https://github.com/ncecere/rummage/releases) page. We provide pre-built binaries for:
+
+- Linux (amd64, arm64)
+- macOS (amd64, arm64)
+- Windows (amd64)
+
+### Release Process
+
+Releases are automatically created when a new tag is pushed to the repository:
+
+```bash
+# Create a new tag
+git tag -a v1.0.0 -m "Release v1.0.0"
+
+# Push the tag
+git push origin v1.0.0
+```
+
+This will trigger the GitHub Actions workflow that builds the binaries, creates a GitHub release, and pushes the Docker image to the GitHub Container Registry.
+
 ## Testing
 
 The project includes unit tests for all packages:
