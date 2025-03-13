@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -110,10 +112,69 @@ func (s *scraper) extractMarkdown(doc *goquery.Document) string {
 
 	// Convert HTML to markdown
 	converter := md.NewConverter("", true, nil)
+
+	// Add an After hook to remove line numbers from code blocks
+	converter.After(func(markdown string) string {
+		// Use a regular expression to find and remove line numbers in code blocks
+		return removeLineNumbersFromCodeBlocks(markdown)
+	})
+
 	html, _ := docCopy.Html()
 	markdown, _ := converter.ConvertString(html)
 
 	return markdown
+}
+
+// removeLineNumbersFromCodeBlocks removes line numbers from code blocks in markdown.
+// It looks for patterns like \n123\n124\n125 and removes them.
+func removeLineNumbersFromCodeBlocks(markdown string) string {
+	// Split the markdown by code block delimiters
+	parts := strings.Split(markdown, "```")
+
+	// Process each code block (odd indices are code blocks)
+	for i := 1; i < len(parts); i += 2 {
+		if i < len(parts) {
+			// Find and remove line numbers in the code block
+			lines := strings.Split(parts[i], "\n")
+			if len(lines) > 1 {
+				// Check if the first line is the language identifier
+				startIdx := 1
+				if !isLineNumber(lines[0]) {
+					startIdx = 2 // Skip language identifier and first line
+				}
+
+				// Process each line
+				cleanedLines := []string{lines[0]} // Keep language identifier
+				for j := startIdx; j < len(lines); j++ {
+					// Remove line numbers at the beginning of lines
+					cleanedLines = append(cleanedLines, removeLineNumber(lines[j]))
+				}
+
+				// Rejoin the cleaned lines
+				parts[i] = strings.Join(cleanedLines, "\n")
+			}
+		}
+	}
+
+	// Rejoin the markdown with code block delimiters
+	return strings.Join(parts, "```")
+}
+
+// isLineNumber checks if a string is just a line number.
+func isLineNumber(s string) bool {
+	// Trim whitespace
+	s = strings.TrimSpace(s)
+
+	// Check if it's a number
+	_, err := strconv.Atoi(s)
+	return err == nil
+}
+
+// removeLineNumber removes line numbers from the beginning of a line.
+func removeLineNumber(line string) string {
+	// Match patterns like "123 " at the beginning of a line
+	re := regexp.MustCompile(`^\s*\d+\s+`)
+	return re.ReplaceAllString(line, "")
 }
 
 // extractHTML extracts processed HTML content from the document.
