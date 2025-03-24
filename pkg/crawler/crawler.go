@@ -2,10 +2,14 @@
 package crawler
 
 import (
+	"compress/gzip"
+	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -94,8 +98,9 @@ func (s *Service) ProcessCrawlJob(jobID string, req model.CrawlRequest) {
 
 	// Get all URLs from the map function
 	mapResult, err := s.Map(mapReq)
-	if err != nil {
-		// If map fails, fall back to the original crawl method
+	if err != nil || len(mapResult.Links) == 0 {
+		// If map fails or returns no URLs, fall back to the original crawl method
+		// but ensure we pass the correct ignoreSitemap value
 		s.processCrawlJobOriginal(jobID, req)
 		return
 	}
@@ -171,6 +176,166 @@ func (s *Service) processCrawlJobOriginal(jobID string, req model.CrawlRequest) 
 		return
 	}
 
+	// Track visited URLs to avoid duplicates
+	visitedURLs := make(map[string]bool)
+	var visitedMutex sync.Mutex
+
+	// Track discovered URLs for processing
+	discoveredURLs := make([]string, 0)
+	var discoveredMutex sync.Mutex
+
+	// Add the initial URL to the discovered URLs
+	discoveredURLs = append(discoveredURLs, req.URL)
+	visitedURLs[req.URL] = true
+
+	// Update the job status to set the initial total count
+	if s.updateJobStatusFn != nil {
+		_ = s.updateJobStatusFn(jobID, "scraping", 1)
+	}
+
+	// Track errors
+	errors := make([]model.CrawlError, 0)
+	robotsBlocked := make([]string, 0)
+	var errorsMutex sync.Mutex
+
+	// First, try to fetch the sitemap.xml if not ignored
+	if !req.IgnoreSitemap {
+		// Try to find sitemap URLs
+		sitemapURLs := []string{
+			fmt.Sprintf("%s://%s/sitemap.xml", baseURL.Scheme, baseURL.Host),
+			fmt.Sprintf("%s://%s/sitemap_index.xml", baseURL.Scheme, baseURL.Host),
+			fmt.Sprintf("%s://%s/sitemap", baseURL.Scheme, baseURL.Host),
+		}
+
+		// Also check for sitemaps in the path
+		if baseURL.Path != "" && baseURL.Path != "/" {
+			// Try with the base path
+			basePath := strings.TrimSuffix(baseURL.Path, "/")
+			sitemapURLs = append(sitemapURLs,
+				fmt.Sprintf("%s://%s%s/sitemap.xml", baseURL.Scheme, baseURL.Host, basePath),
+				fmt.Sprintf("%s://%s%s/sitemap", baseURL.Scheme, baseURL.Host, basePath))
+		}
+
+		// Try to find sitemap in robots.txt
+		robotsTxtURL := fmt.Sprintf("%s://%s/robots.txt", baseURL.Scheme, baseURL.Host)
+		robotsTxtResp, err := s.client.Get(robotsTxtURL)
+		if err == nil && robotsTxtResp.StatusCode == http.StatusOK {
+			defer robotsTxtResp.Body.Close()
+
+			// Read robots.txt content
+			robotsTxtContent, err := io.ReadAll(robotsTxtResp.Body)
+			if err == nil {
+				// Look for Sitemap: entries
+				re := regexp.MustCompile(`(?i)Sitemap:\s*(.+)`)
+				matches := re.FindAllStringSubmatch(string(robotsTxtContent), -1)
+				for _, match := range matches {
+					if len(match) > 1 {
+						sitemapURLs = append(sitemapURLs, strings.TrimSpace(match[1]))
+					}
+				}
+			}
+		}
+
+		// Process all potential sitemap URLs
+		for _, sitemapURL := range sitemapURLs {
+			// Skip if we've already reached the limit
+			if len(discoveredURLs) >= req.Limit {
+				break
+			}
+
+			sitemapResp, err := s.client.Get(sitemapURL)
+			if err != nil || sitemapResp.StatusCode != http.StatusOK {
+				continue
+			}
+			defer sitemapResp.Body.Close()
+
+			// Check if the response is gzipped
+			var reader io.Reader = sitemapResp.Body
+			if strings.HasSuffix(sitemapURL, ".gz") || sitemapResp.Header.Get("Content-Encoding") == "gzip" {
+				gzReader, err := gzip.NewReader(sitemapResp.Body)
+				if err != nil {
+					continue
+				}
+				defer gzReader.Close()
+				reader = gzReader
+			}
+
+			// Try to parse as sitemap index first
+			var sitemapIndex SitemapIndex
+			indexData, err := io.ReadAll(reader)
+			if err != nil {
+				continue
+			}
+
+			// Try to parse as sitemap index
+			if err := xml.Unmarshal(indexData, &sitemapIndex); err == nil && len(sitemapIndex.Sitemaps) > 0 {
+				// Process each sitemap in the index
+				for _, sitemap := range sitemapIndex.Sitemaps {
+					// Skip if we've already reached the limit
+					if len(discoveredURLs) >= req.Limit {
+						break
+					}
+
+					// Process the individual sitemap
+					s.processSitemap(sitemap.Loc, model.MapRequest{
+						URL:               req.URL,
+						IncludePaths:      req.IncludePaths,
+						ExcludePaths:      req.ExcludePaths,
+						IncludeSubdomains: req.AllowExternalLinks,
+						Limit:             req.Limit,
+					}, &discoveredURLs, visitedURLs, &discoveredMutex, &visitedMutex)
+				}
+			} else {
+				// Try to parse as regular sitemap
+				var urlset URLSet
+				if err := xml.Unmarshal(indexData, &urlset); err == nil && len(urlset.URLs) > 0 {
+					// Add all URLs from sitemap to discovered URLs
+					discoveredMutex.Lock()
+					for _, u := range urlset.URLs {
+						if len(discoveredURLs) < req.Limit && shouldProcessURL(u.Loc, req.IncludePaths, req.ExcludePaths) {
+							// Check if we've already visited this URL
+							visitedMutex.Lock()
+							if !visitedURLs[u.Loc] {
+								visitedURLs[u.Loc] = true
+								discoveredURLs = append(discoveredURLs, u.Loc)
+							}
+							visitedMutex.Unlock()
+						}
+					}
+					discoveredMutex.Unlock()
+				} else {
+					// Try to handle non-standard sitemap formats
+					// Some sitemaps might just be a plain list of URLs
+					contentStr := string(indexData)
+
+					// Check if it's a plain text list of URLs (one per line)
+					lines := strings.Split(contentStr, "\n")
+					discoveredMutex.Lock()
+					for _, line := range lines {
+						line = strings.TrimSpace(line)
+						if line == "" || strings.HasPrefix(line, "#") {
+							continue // Skip empty lines and comments
+						}
+
+						// Check if it looks like a URL
+						if strings.HasPrefix(line, "http://") || strings.HasPrefix(line, "https://") {
+							if len(discoveredURLs) < req.Limit && shouldProcessURL(line, req.IncludePaths, req.ExcludePaths) {
+								// Check if we've already visited this URL
+								visitedMutex.Lock()
+								if !visitedURLs[line] {
+									visitedURLs[line] = true
+									discoveredURLs = append(discoveredURLs, line)
+								}
+								visitedMutex.Unlock()
+							}
+						}
+					}
+					discoveredMutex.Unlock()
+				}
+			}
+		}
+	}
+
 	// Create a new collector with the specified options
 	c := colly.NewCollector(
 		colly.MaxDepth(req.MaxDepth),
@@ -186,27 +351,6 @@ func (s *Service) processCrawlJobOriginal(jobID string, req model.CrawlRequest) 
 	if err != nil {
 		return
 	}
-
-	// Track visited URLs to avoid duplicates
-	visitedURLs := make(map[string]bool)
-	var visitedMutex sync.Mutex
-
-	// Track discovered URLs for processing
-	discoveredURLs := make([]string, 0)
-	var discoveredMutex sync.Mutex
-
-	// Add the initial URL to the discovered URLs
-	discoveredURLs = append(discoveredURLs, req.URL)
-
-	// Update the job status to set the initial total count
-	if s.updateJobStatusFn != nil {
-		_ = s.updateJobStatusFn(jobID, "scraping", 1)
-	}
-
-	// Track errors
-	errors := make([]model.CrawlError, 0)
-	robotsBlocked := make([]string, 0)
-	var errorsMutex sync.Mutex
 
 	// Set timeout
 	timeout := 30000 // Default 30 seconds
