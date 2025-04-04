@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/ncecere/rummage/pkg/model"
 )
 
 // ScrapeHandler handles requests to the /scrape endpoint
@@ -19,52 +21,27 @@ func NewScrapeHandler(opts RouterOptions) *ScrapeHandler {
 	}
 }
 
-// ScrapeRequest represents the request body for the /scrape endpoint
-type ScrapeRequest struct {
-	URL             string   `json:"url"`
-	Formats         []string `json:"formats,omitempty"`
-	OnlyMainContent bool     `json:"onlyMainContent,omitempty"`
-	IncludeTags     []string `json:"includeTags,omitempty"`
-	ExcludeTags     []string `json:"excludeTags,omitempty"`
-	WaitFor         int      `json:"waitFor,omitempty"`
-	Timeout         int      `json:"timeout,omitempty"`
-}
-
-// ScrapeResponse represents the response body for the /scrape endpoint
-type ScrapeResponse struct {
-	Success bool        `json:"success"`
-	Data    interface{} `json:"data,omitempty"`
-}
-
-// HandleScrape handles POST requests to the /scrape endpoint
-func (h *ScrapeHandler) HandleScrape(w http.ResponseWriter, r *http.Request) {
-	var req ScrapeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+// handleScrape handles requests to scrape a single URL.
+func (r *Router) handleScrape(w http.ResponseWriter, req *http.Request) {
+	var scrapeReq model.ScrapeRequest
+	if err := json.NewDecoder(req.Body).Decode(&scrapeReq); err != nil {
+		respondError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
 	}
 
-	// Validate request
-	if req.URL == "" {
-		http.Error(w, "URL is required", http.StatusBadRequest)
+	// Validate URL
+	if scrapeReq.URL == "" {
+		respondError(w, http.StatusBadRequest, "URL is required")
 		return
 	}
 
-	// TODO: Implement scraping logic
-
-	// For now, return a placeholder response
-	resp := ScrapeResponse{
-		Success: true,
-		Data: map[string]interface{}{
-			"markdown": "# Placeholder\nThis is a placeholder response.",
-			"metadata": map[string]interface{}{
-				"title":      "Placeholder",
-				"sourceURL":  req.URL,
-				"statusCode": 200,
-			},
-		},
+	// Perform scrape
+	result, err := r.scraper.Scrape(scrapeReq)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "Failed to scrape URL: "+err.Error())
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	// Return result
+	respondSuccess(w, result)
 }
